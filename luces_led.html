@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Control de 5 Luces LED</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#111;color:#eee;
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       display:flex;align-items:center;justify-content:center;padding:16px}
+  .card{width:min(94vw,420px);background:#1b1b1b;border:1px solid #2e2e2e;border-radius:16px;padding:18px}
+  h1{font-size:15px;font-weight:600;margin:0 0 14px;color:#9ad}
+  h2{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+     color:#777;margin:16px 0 6px}
+  .lentes{display:flex;justify-content:space-between;gap:8px;padding:10px 4px}
+  .led{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px}
+  .bulbo{width:100%;aspect-ratio:1;max-width:52px;border-radius:50%;
+         background:#222;border:2px solid #3a3a3a;transition:all .15s ease;
+         box-shadow:inset 0 0 8px #000}
+  .bulbo.on{background:#ffd54a;border-color:#ffe89a;
+            box-shadow:0 0 14px #ffd54a,0 0 26px #ffb300aa,inset 0 0 6px #fff8}
+  .led span{font-size:10px;color:#888;letter-spacing:.04em}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  button{flex:1;min-width:58px;padding:9px 6px;border:1px solid #3a3a3a;border-radius:9px;
+         background:#262626;color:#eee;font-size:13px;cursor:pointer}
+  button:hover{background:#333}
+  button.on{background:#0af;border-color:#0af;color:#000;font-weight:600}
+  .st{margin-top:10px;font-size:12px;color:#8f8;text-align:center;min-height:16px}
+  .st.warn{color:#f88}
+  .badge{display:inline-block;font-size:10px;padding:2px 7px;border-radius:20px;
+         background:#333;color:#bbb;vertical-align:middle;margin-left:6px}
+  .badge.ok{background:#0a5;color:#fff}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Control de Luces LED <span class="badge" id="badge">SIMULACIÓN</span></h1>
+
+  <div class="lentes" id="lentes"></div>
+
+  <div class="row">
+    <button onclick="alternar(0)">LED 1</button>
+    <button onclick="alternar(1)">LED 2</button>
+    <button onclick="alternar(2)">LED 3</button>
+    <button onclick="alternar(3)">LED 4</button>
+    <button onclick="alternar(4)">LED 5</button>
+  </div>
+  <div class="row">
+    <button onclick="todas(true)">Encender todas</button>
+    <button onclick="todas(false)">Apagar todas</button>
+  </div>
+
+  <h2>Conexión Serial (USB)</h2>
+  <div class="row">
+    <button id="btnLink" onclick="conectar()">Conectar Arduino (USB)</button>
+  </div>
+
+  <div class="st warn" id="st">Sin conexión: conecta el Arduino por USB para encender las luces</div>
+</div>
+
+<script>
+const NUM_LEDS = 5;
+const estado = new Array(NUM_LEDS).fill(false);
+
+let port = null;
+let writer = null;
+let reader = null;
+let serialOk = false;
+
+const $ = id => document.getElementById(id);
+
+const cont = $('lentes');
+for (let i = 0; i < NUM_LEDS; i++) {
+  const d = document.createElement('div');
+  d.className = 'led';
+  d.innerHTML = `<div class="bulbo" id="b${i}"></div><span>LED ${i + 1}</span>`;
+  cont.appendChild(d);
+}
+
+function pinta() {
+  for (let i = 0; i < NUM_LEDS; i++) $('b' + i).classList.toggle('on', estado[i]);
+  const n = estado.filter(Boolean).length;
+  if (serialOk) {
+    av('\u2713 Arduino conectado \u00B7 ' + (n === 0 ? 'todas apagadas' : n + ' encendida(s)'));
+  } else {
+    av('Sin conexión: conecta el Arduino por USB para encender las luces', true);
+  }
+}
+
+function requiereConexion() {
+  if (!serialOk) {
+    av('\u26A0 Conecta el Arduino por USB antes de encender las luces', true);
+    return false;
+  }
+  return true;
+}
+
+function alternar(i) {
+  if (!requiereConexion()) return;
+  estado[i] = !estado[i];
+  pinta();
+  enviarSerial(`LED:${i + 1}:${estado[i] ? 1 : 0}`);
+}
+
+function todas(v) {
+  if (!requiereConexion()) return;
+  for (let i = 0; i < NUM_LEDS; i++) estado[i] = v;
+  pinta();
+  enviarSerial(`LEDS:${estado.map(e => e ? 1 : 0).join('')}`);
+}
+
+async function enviarSerial(texto) {
+  if (serialOk && writer) {
+    try { await writer.write(texto + '\n'); }
+    catch (e) { cae(); }
+  }
+}
+
+function cae() {
+  serialOk = false;
+  $('badge').textContent = 'SIMULACIÓN';
+  $('badge').className = 'badge';
+  $('btnLink').textContent = 'Conectar Arduino (USB)';
+  port = null; writer = null; reader = null;
+  av('Sin conexión: conecta el Arduino por USB para encender las luces', true);
+}
+
+async function conectar() {
+  if (!navigator.serial) {
+    alert("Tu navegador no soporta Web Serial. Usa Chrome o Edge.");
+    return;
+  }
+
+  if (serialOk) { window.location.reload(); return; }
+
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+
+    const textEncoder = new TextEncoderStream();
+    textEncoder.readable.pipeTo(port.writable);
+    writer = textEncoder.writable.getWriter();
+
+    $('badge').textContent = 'ARDUINO EN LÍNEA';
+    $('badge').className = 'badge ok';
+    $('btnLink').textContent = 'Desconectar';
+    serialOk = true;
+
+    pinta();
+    leerSerial();
+  } catch (e) {
+    cae();
+    av('Conexión cancelada o puerto ocupado');
+  }
+}
+
+async function leerSerial() {
+  const textDecoder = new TextDecoderStream();
+  port.readable.pipeTo(textDecoder.writable);
+  reader = textDecoder.readable.getReader();
+
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+
+      let end = buffer.indexOf('\n');
+      while (end >= 0) {
+        let line = buffer.slice(0, end).trim();
+        buffer = buffer.slice(end + 1);
+
+        if (line.startsWith('{')) {
+          try {
+            const j = JSON.parse(line);
+            if (Array.isArray(j.leds)) {
+              for (let i = 0; i < NUM_LEDS; i++) estado[i] = !!j.leds[i];
+              pinta();
+            }
+          } catch (e) {}
+        }
+        end = buffer.indexOf('\n');
+      }
+    }
+  } catch (e) { cae(); }
+}
+
+function av(t, warn) {
+  const el = $('st');
+  el.textContent = t;
+  el.classList.toggle('warn', !!warn);
+}
+
+pinta();
+</script>
+</body>
+</html>
