@@ -1,0 +1,1 @@
+control de luces de una casa domotica que consta de 5 cuartos, ademas de contar con opcion de encender y apagar todos, se utiliza una web para el manejo de los led, y el cual envia los datos o pulsos al arduino
